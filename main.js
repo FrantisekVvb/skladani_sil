@@ -577,6 +577,18 @@ async function animateResultantConstruction() {
   updateButtons();
 }
 
+function toggleResultantConstruction() {
+  if (constructionAnimating || animating) return;
+
+  if (resultantVisible) {
+    clearConstruction();
+    updateButtons();
+    return;
+  }
+
+  animateResultantConstruction();
+}
+
 function getResultantForce() {
   let fx = 0;
   let fy = 0;
@@ -594,6 +606,8 @@ function updateButtons() {
   const interactionLocked = animating || constructionAnimating;
   startBtn.disabled = interactionLocked || arrows.length === 0;
   resultantBtn.disabled = interactionLocked || arrows.length === 0;
+  resultantBtn.classList.toggle("is-active", resultantVisible);
+  resultantBtn.setAttribute("aria-pressed", String(resultantVisible));
 }
 
 function clearArrows() {
@@ -806,7 +820,7 @@ objectHit.addEventListener("pointermove", onPointerMove);
 objectHit.addEventListener("pointerup", endDrag);
 objectHit.addEventListener("pointercancel", endDrag);
 startBtn.addEventListener("click", startSimulation);
-resultantBtn.addEventListener("click", animateResultantConstruction);
+resultantBtn.addEventListener("click", toggleResultantConstruction);
 snap90Btn.addEventListener("click", toggleSnap90);
 resetBtn.addEventListener("click", resetSimulation);
 

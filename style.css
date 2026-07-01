@@ -58,6 +58,10 @@ body {
   color: #ffffff;
 }
 
+.resultant-btn.is-active {
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.85);
+}
+
 .start-btn {
   background: #803b50;
   color: #ffffff;
