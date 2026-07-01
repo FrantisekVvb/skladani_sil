@@ -16,6 +16,8 @@ const OBJECT_MASS = 1;
 const ACCEL_SCALE = 3;
 const FORCE_STEP = 1;
 const MIN_FORCE = 1;
+const TIP_HANDLE_RADIUS = 20;
+const TIP_DRAG_THRESHOLD = 2;
 const RESULTANT_ZERO_THRESHOLD = 0.5;
 const CONSTRUCTION_STEP_MS = 750;
 const RESULTANT_COLOR = "#FF184A";
@@ -51,6 +53,55 @@ function clientToSvgPoint(clientX, clientY) {
   if (!ctm) return { x: 0, y: 0 };
   const p = pt.matrixTransform(ctm.inverse());
   return { x: p.x, y: p.y };
+}
+
+function isPrimaryPointerDown(e) {
+  return e.pointerType !== "mouse" || e.button === 0;
+}
+
+function findArrowByTipPoint(x, y) {
+  let bestArrow = null;
+  let bestDistance = TIP_HANDLE_RADIUS;
+
+  for (const arrow of arrows) {
+    if (!arrow.force || arrow.tipHandle.getAttribute("display") === "none") continue;
+
+    const tipX = Number(arrow.tipHandle.getAttribute("cx"));
+    const tipY = Number(arrow.tipHandle.getAttribute("cy"));
+    const distance = Math.hypot(x - tipX, y - tipY);
+
+    if (distance <= bestDistance) {
+      bestArrow = arrow;
+      bestDistance = distance;
+    }
+  }
+
+  return bestArrow;
+}
+
+function beginPointerCapture(e) {
+  if (typeof svg.setPointerCapture === "function") {
+    svg.setPointerCapture(e.pointerId);
+  }
+}
+
+function shouldUpdateTipDrag(dragState, x, y) {
+  if (dragState.hasMoved) return true;
+
+  const moved =
+    Math.hypot(x - dragState.startX, y - dragState.startY) >= TIP_DRAG_THRESHOLD;
+  if (moved) dragState.hasMoved = true;
+  return moved;
+}
+
+function releasePointerCaptureSafe(pointerId) {
+  if (typeof svg.releasePointerCapture !== "function") return;
+
+  try {
+    svg.releasePointerCapture(pointerId);
+  } catch {
+    // ignore
+  }
 }
 
 function getPlusCenter() {
@@ -296,7 +347,7 @@ function createArrow() {
   const headB = document.createElementNS("http://www.w3.org/2000/svg", "line");
   const tipHandle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
   tipHandle.setAttribute("class", "arrow-tip-handle");
-  tipHandle.setAttribute("r", "10");
+  tipHandle.setAttribute("r", String(TIP_HANDLE_RADIUS));
   tipHandle.setAttribute("fill", "transparent");
   tipHandle.setAttribute("stroke", "none");
   const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
@@ -311,9 +362,6 @@ function createArrow() {
   svg.appendChild(label);
 
   tipHandle.addEventListener("pointerdown", onTipPointerDown);
-  tipHandle.addEventListener("pointermove", onPointerMove);
-  tipHandle.addEventListener("pointerup", endDrag);
-  tipHandle.addEventListener("pointercancel", endDrag);
 
   return { group: g, line, headA, headB, tipHandle, label, jetMotor: null, force: null };
 }
@@ -848,12 +896,19 @@ function startSimulation() {
 }
 
 function onPointerDown(e) {
-  if (e.button !== 0 || animating || constructionAnimating) return;
+  if (!isPrimaryPointerDown(e) || animating || constructionAnimating) return;
   if (arrows.length >= MAX_ARROWS) return;
+
+  const p = clientToSvgPoint(e.clientX, e.clientY);
+  const tipArrow = findArrowByTipPoint(p.x, p.y);
+  if (tipArrow) {
+    startTipDrag(e, tipArrow);
+    return;
+  }
 
   e.preventDefault();
 
-  objectHit.setPointerCapture(e.pointerId);
+  beginPointerCapture(e);
   objectHit.classList.add("is-dragging");
 
   const arrow = createArrow();
@@ -868,40 +923,56 @@ function onPointerDown(e) {
     handle: null,
   };
 
-  const p = clientToSvgPoint(e.clientX, e.clientY);
   updateArrow(arrow, origin.x, origin.y, p.x, p.y);
 }
 
-function onTipPointerDown(e) {
-  if (e.button !== 0 || animating || constructionAnimating) return;
-
+function startTipDrag(e, arrow) {
   e.preventDefault();
   e.stopPropagation();
+
+  beginPointerCapture(e);
+  arrow.tipHandle.classList.add("is-dragging");
+
+  const p = clientToSvgPoint(e.clientX, e.clientY);
+  drag = {
+    mode: "tip",
+    pointerId: e.pointerId,
+    arrow,
+    handle: arrow.tipHandle,
+    startX: p.x,
+    startY: p.y,
+    hasMoved: false,
+  };
+}
+
+function onTipPointerDown(e) {
+  if (!isPrimaryPointerDown(e) || animating || constructionAnimating) return;
 
   const handle = e.currentTarget;
   const arrow = arrows.find((item) => item.tipHandle === handle);
   if (!arrow) return;
 
-  handle.setPointerCapture(e.pointerId);
-  handle.classList.add("is-dragging");
+  startTipDrag(e, arrow);
+}
 
-  drag = {
-    mode: "tip",
-    pointerId: e.pointerId,
-    arrow,
-    handle,
-  };
+function onSvgPointerDown(e) {
+  if (!isPrimaryPointerDown(e) || animating || constructionAnimating || drag) return;
+  if (objectHit.contains(e.target)) return;
+  if (e.target instanceof Element && e.target.closest(".arrow-tip-handle")) return;
 
-  const origin = getArrowOrigin();
   const p = clientToSvgPoint(e.clientX, e.clientY);
-  updateArrow(arrow, origin.x, origin.y, p.x, p.y);
+  const tipArrow = findArrowByTipPoint(p.x, p.y);
+  if (tipArrow) startTipDrag(e, tipArrow);
 }
 
 function onPointerMove(e) {
   if (!drag || e.pointerId !== drag.pointerId) return;
-  e.preventDefault();
 
   const p = clientToSvgPoint(e.clientX, e.clientY);
+  if (drag.mode === "tip" && !shouldUpdateTipDrag(drag, p.x, p.y)) return;
+
+  e.preventDefault();
+
   const origin = getArrowOrigin();
   updateArrow(drag.arrow, origin.x, origin.y, p.x, p.y);
   updateButtons();
@@ -911,29 +982,27 @@ function endDrag(e) {
   if (!drag || e.pointerId !== drag.pointerId) return;
   e.preventDefault();
 
-  const target = drag.mode === "create" ? objectHit : drag.handle;
-  try {
-    target.releasePointerCapture(e.pointerId);
-  } catch {
-    // ignore
-  }
+  releasePointerCaptureSafe(e.pointerId);
 
   objectHit.classList.remove("is-dragging");
   if (drag.handle) drag.handle.classList.remove("is-dragging");
 
-  const p = clientToSvgPoint(e.clientX, e.clientY);
-  const origin = getArrowOrigin();
-  const visible = updateArrow(drag.arrow, origin.x, origin.y, p.x, p.y);
-  if (!visible) removeArrow(drag.arrow);
+  if (drag.mode !== "tip" || drag.hasMoved) {
+    const p = clientToSvgPoint(e.clientX, e.clientY);
+    const origin = getArrowOrigin();
+    const visible = updateArrow(drag.arrow, origin.x, origin.y, p.x, p.y);
+    if (!visible) removeArrow(drag.arrow);
+  }
 
   drag = null;
   updateButtons();
 }
 
 objectHit.addEventListener("pointerdown", onPointerDown);
-objectHit.addEventListener("pointermove", onPointerMove);
-objectHit.addEventListener("pointerup", endDrag);
-objectHit.addEventListener("pointercancel", endDrag);
+svg.addEventListener("pointerdown", onSvgPointerDown);
+svg.addEventListener("pointermove", onPointerMove);
+svg.addEventListener("pointerup", endDrag);
+svg.addEventListener("pointercancel", endDrag);
 startBtn.addEventListener("click", startSimulation);
 resultantBtn.addEventListener("click", toggleResultantConstruction);
 snap90Btn.addEventListener("click", toggleSnap90);
