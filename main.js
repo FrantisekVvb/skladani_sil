@@ -16,6 +16,7 @@ const OBJECT_MASS = 1;
 const ACCEL_SCALE = 3;
 const FORCE_STEP = 1;
 const MIN_FORCE = 1;
+const RESULTANT_ZERO_THRESHOLD = 0.5;
 const CONSTRUCTION_STEP_MS = 750;
 const RESULTANT_COLOR = "#FF184A";
 const CIRCLE_R = 25.4297;
@@ -453,12 +454,12 @@ function positionResultantLabel(label, tipX, tipY, angle, magnitude) {
 }
 
 function renderResultantArrow(origin, partialX, partialY) {
+  const { fx, fy, magnitude } = applyResultantThreshold(partialX, partialY);
   const resultantEnd = {
-    x: origin.x + partialX,
-    y: origin.y + partialY,
+    x: origin.x + fx,
+    y: origin.y + fy,
   };
-  const magnitude = Math.hypot(partialX, partialY);
-  const angle = Math.atan2(partialY, partialX);
+  const angle = Math.atan2(fy, fx);
   const group = ensureConstructionGroup();
   const resultantLine = document.createElementNS("http://www.w3.org/2000/svg", "line");
   resultantLine.setAttribute("class", "resultant-arrow");
@@ -564,12 +565,12 @@ function syncResultantIfVisible() {
 }
 
 async function drawResultantArrow(origin, partialX, partialY, animate = true) {
+  const { fx, fy, magnitude } = applyResultantThreshold(partialX, partialY);
   const resultantEnd = {
-    x: origin.x + partialX,
-    y: origin.y + partialY,
+    x: origin.x + fx,
+    y: origin.y + fy,
   };
-  const magnitude = Math.hypot(partialX, partialY);
-  const angle = Math.atan2(partialY, partialX);
+  const angle = Math.atan2(fy, fx);
   const group = ensureConstructionGroup();
   const resultantLine = document.createElementNS("http://www.w3.org/2000/svg", "line");
   resultantLine.setAttribute("class", "resultant-arrow");
@@ -689,6 +690,14 @@ function toggleResultantConstruction() {
   animateResultantConstruction();
 }
 
+function applyResultantThreshold(fx, fy) {
+  const magnitude = Math.hypot(fx, fy);
+  if (magnitude < RESULTANT_ZERO_THRESHOLD) {
+    return { fx: 0, fy: 0, magnitude: 0 };
+  }
+  return { fx, fy, magnitude };
+}
+
 function getResultantForce() {
   let fx = 0;
   let fy = 0;
@@ -699,13 +708,14 @@ function getResultantForce() {
     fy += arrow.force.dy;
   }
 
-  return { fx, fy, magnitude: Math.hypot(fx, fy) };
+  return applyResultantThreshold(fx, fy);
 }
 
 function updateButtons() {
   const interactionLocked = animating || constructionAnimating;
   startBtn.disabled = interactionLocked || arrows.length === 0;
   resultantBtn.disabled = interactionLocked || arrows.length === 0;
+  snap90Btn.disabled = animating;
   resultantBtn.classList.toggle("is-active", resultantVisible);
   resultantBtn.setAttribute("aria-pressed", String(resultantVisible));
 }
@@ -759,6 +769,8 @@ function snapExistingArrowsToAxis() {
 }
 
 function toggleSnap90() {
+  if (animating) return;
+
   snap90Active = !snap90Active;
   snap90Btn.classList.toggle("is-active", snap90Active);
   snap90Btn.setAttribute("aria-pressed", String(snap90Active));
