@@ -46,13 +46,14 @@ let jetMotorTemplate = null;
 let jetMotorCounter = 0;
 
 function clientToSvgPoint(clientX, clientY) {
-  const pt = svg.createSVGPoint();
-  pt.x = clientX;
-  pt.y = clientY;
-  const ctm = svg.getScreenCTM();
-  if (!ctm) return { x: 0, y: 0 };
-  const p = pt.matrixTransform(ctm.inverse());
-  return { x: p.x, y: p.y };
+  const rect = svg.getBoundingClientRect();
+  const viewBox = svg.viewBox.baseVal;
+  if (rect.width === 0 || rect.height === 0) return { x: 0, y: 0 };
+
+  return {
+    x: viewBox.x + ((clientX - rect.left) / rect.width) * viewBox.width,
+    y: viewBox.y + ((clientY - rect.top) / rect.height) * viewBox.height,
+  };
 }
 
 function isPrimaryPointerDown(e) {
@@ -285,9 +286,9 @@ function updateArrow(arrow, fromX, fromY, toX, toY) {
     return false;
   }
 
+  const tipX = toX;
+  const tipY = toY;
   const angle = Math.atan2(dy, dx);
-  const tipX = fromX + Math.cos(angle) * snappedLen;
-  const tipY = fromY + Math.sin(angle) * snappedLen;
   const forceDx = Math.cos(angle) * snappedLen;
   const forceDy = Math.sin(angle) * snappedLen;
 
