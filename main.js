@@ -943,4 +943,15 @@ loadJetMotorTemplate().then(() => {
   syncJetMotors();
 });
 
+const stage = document.querySelector(".stage");
+if (stage) {
+  stage.addEventListener(
+    "touchmove",
+    (e) => {
+      if (e.cancelable) e.preventDefault();
+    },
+    { passive: false }
+  );
+}
+
 updateButtons();
