@@ -1,0 +1,133 @@
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: #ffffff;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial,
+    "Apple Color Emoji", "Segoe UI Emoji";
+}
+
+.stage {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.simulation {
+  flex: 1;
+  display: grid;
+  place-items: center;
+}
+
+.object-wrap {
+  will-change: transform;
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+  padding: 24px;
+}
+
+.action-btn {
+  padding: 10px 28px;
+  border: none;
+  border-radius: 10px;
+  font: inherit;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.snap90-btn {
+  background: #e8e8e8;
+  color: #222222;
+}
+
+.snap90-btn.is-active {
+  background: #00805b;
+  color: #ffffff;
+}
+
+.resultant-btn {
+  background: #00805b;
+  color: #ffffff;
+}
+
+.start-btn {
+  background: #803b50;
+  color: #ffffff;
+}
+
+.reset-btn {
+  background: #e8e8e8;
+  color: #222222;
+}
+
+.action-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.tile {
+  display: block;
+  transform: scale(1.3);
+  transform-origin: center;
+  overflow: visible;
+}
+
+.force-arrow {
+  pointer-events: none;
+}
+
+.object-hit {
+  cursor: grab;
+}
+
+.object-hit.is-dragging {
+  cursor: grabbing;
+}
+
+.force-construction {
+  pointer-events: none;
+}
+
+.resultant-arrow {
+  pointer-events: none;
+}
+
+.resultant-label {
+  fill: #ff184a;
+  stroke: none;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial,
+    sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  pointer-events: none;
+  user-select: none;
+}
+
+.force-label {
+  fill: #222222;
+  stroke: none;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial,
+    sans-serif;
+  font-size: 11px;
+  font-weight: 500;
+  pointer-events: none;
+  user-select: none;
+}
+
+.arrow-tip-handle {
+  cursor: grab;
+  pointer-events: all;
+}
+
+.arrow-tip-handle.is-dragging {
+  cursor: grabbing;
+}
+

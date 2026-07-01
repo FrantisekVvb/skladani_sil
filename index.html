@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="cs">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>skládání sil</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main class="stage" aria-label="Skládání sil">
+      <div class="simulation">
+        <div id="object-wrap" class="object-wrap">
+          <svg
+            class="tile"
+            width="75"
+            height="51"
+            viewBox="0 0 75 51"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+            aria-label="Objekt"
+            role="img"
+          >
+            <g id="object-hit" class="object-hit">
+              <rect width="74.1094" height="50.8594" rx="10" fill="#803B50" />
+              <g id="plus" class="plus" fill="#000000" aria-hidden="true">
+                <rect x="24.5" y="23.5" width="26" height="4" rx="2" />
+                <rect x="35.5" y="12.5" width="4" height="26" rx="2" />
+              </g>
+            </g>
+          </svg>
+        </div>
+      </div>
+      <div class="controls">
+        <button id="snap90-btn" class="action-btn snap90-btn" type="button" aria-pressed="false">
+          90°
+        </button>
+        <button id="resultant-btn" class="action-btn resultant-btn" type="button">
+          Výsledná síla
+        </button>
+        <button id="start-btn" class="action-btn start-btn" type="button">Spustit</button>
+        <button id="reset-btn" class="action-btn reset-btn" type="button">Reset</button>
+      </div>
+    </main>
+    <script src="main.js"></script>
+  </body>
+</html>
