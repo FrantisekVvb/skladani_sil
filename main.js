@@ -18,6 +18,12 @@ const FORCE_STEP = 1;
 const MIN_FORCE = 1;
 const CONSTRUCTION_STEP_MS = 750;
 const RESULTANT_COLOR = "#FF184A";
+const CIRCLE_R = 25.4297;
+const JET_NOZZLE_RIGHT = 156;
+const JET_HEIGHT = 72;
+const JET_WIDTH = 160;
+const JET_SCALE_MIN = 0.09;
+const JET_SCALE_LOG_FACTOR = 0.1;
 const arrows = [];
 
 let drag = null;
@@ -31,6 +37,8 @@ let simulationForce = { fx: 0, fy: 0 };
 let lastFrameTime = null;
 let snap90Active = false;
 let resultantVisible = false;
+let jetMotorTemplate = null;
+let jetMotorCounter = 0;
 
 function clientToSvgPoint(clientX, clientY) {
   const pt = svg.createSVGPoint();
@@ -49,6 +57,87 @@ function getPlusCenter() {
 
 function getArrowOrigin() {
   return getPlusCenter();
+}
+
+async function loadJetMotorTemplate() {
+  const response = await fetch("assets/tryskovy-motor.svg");
+  const text = await response.text();
+  const doc = new DOMParser().parseFromString(text, "image/svg+xml");
+  jetMotorTemplate = doc.documentElement;
+}
+
+function createJetMotorGraphic(uniqueId) {
+  const nested = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  nested.setAttribute("width", String(JET_WIDTH));
+  nested.setAttribute("height", String(JET_HEIGHT));
+  nested.setAttribute("viewBox", "0 0 160 72");
+  nested.setAttribute("fill", "none");
+  nested.setAttribute("overflow", "visible");
+
+  for (const child of jetMotorTemplate.children) {
+    nested.appendChild(document.importNode(child, true));
+  }
+
+  const outer = nested.querySelector("#jet-outer");
+  const inner = nested.querySelector("#jet-inner");
+  if (outer) outer.id = `jet-outer-${uniqueId}`;
+  if (inner) inner.id = `jet-inner-${uniqueId}`;
+
+  nested.querySelectorAll('[fill="url(#jet-outer)"]').forEach((node) => {
+    node.setAttribute("fill", `url(#jet-outer-${uniqueId})`);
+  });
+  nested.querySelectorAll('[fill="url(#jet-inner)"]').forEach((node) => {
+    node.setAttribute("fill", `url(#jet-inner-${uniqueId})`);
+  });
+
+  return nested;
+}
+
+function ensureJetMotor(arrow) {
+  if (arrow.jetMotor || !jetMotorTemplate) return;
+
+  const uniqueId = ++jetMotorCounter;
+  const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
+  group.setAttribute("class", "jet-motor");
+  group.setAttribute("visibility", "hidden");
+  group.setAttribute("aria-hidden", "true");
+  group.appendChild(createJetMotorGraphic(uniqueId));
+  objectHit.insertBefore(group, plus);
+  arrow.jetMotor = group;
+}
+
+function getJetScale(magnitude) {
+  return JET_SCALE_MIN + JET_SCALE_LOG_FACTOR * Math.log10(magnitude);
+}
+
+function updateJetMotor(arrow) {
+  if (!arrow.force || !animating) {
+    if (arrow.jetMotor) arrow.jetMotor.setAttribute("visibility", "hidden");
+    return;
+  }
+
+  ensureJetMotor(arrow);
+  if (!arrow.jetMotor) return;
+
+  const angle = Math.atan2(arrow.force.dy, arrow.force.dx);
+  const origin = getArrowOrigin();
+  const mountX = origin.x - Math.cos(angle) * CIRCLE_R;
+  const mountY = origin.y - Math.sin(angle) * CIRCLE_R;
+  const deg = (angle * 180) / Math.PI;
+  const scale = getJetScale(arrow.force.magnitude);
+
+  arrow.jetMotor.setAttribute("visibility", "visible");
+  arrow.jetMotor.classList.toggle("is-active", animating);
+  arrow.jetMotor.setAttribute(
+    "transform",
+    `translate(${mountX} ${mountY}) rotate(${deg}) scale(${scale}) translate(${-JET_NOZZLE_RIGHT} ${-JET_HEIGHT / 2})`
+  );
+}
+
+function syncJetMotors() {
+  for (const arrow of arrows) {
+    updateJetMotor(arrow);
+  }
 }
 
 function formatForce(newtons) {
@@ -131,6 +220,7 @@ function updateArrow(arrow, fromX, fromY, toX, toY) {
     arrow.group.setAttribute("display", "none");
     arrow.label.setAttribute("display", "none");
     arrow.force = null;
+    updateJetMotor(arrow);
     syncResultantIfVisible();
     return false;
   }
@@ -177,6 +267,7 @@ function updateArrow(arrow, fromX, fromY, toX, toY) {
   svg.appendChild(arrow.label);
 
   arrow.force = { dx: forceDx, dy: forceDy, magnitude: snappedLen };
+  updateJetMotor(arrow);
   syncResultantIfVisible();
   return true;
 }
@@ -215,12 +306,13 @@ function createArrow() {
   tipHandle.addEventListener("pointerup", endDrag);
   tipHandle.addEventListener("pointercancel", endDrag);
 
-  return { group: g, line, headA, headB, tipHandle, label, force: null };
+  return { group: g, line, headA, headB, tipHandle, label, jetMotor: null, force: null };
 }
 
 function removeArrow(arrow) {
   arrow.group.remove();
   arrow.label.remove();
+  if (arrow.jetMotor) arrow.jetMotor.remove();
   const index = arrows.indexOf(arrow);
   if (index >= 0) arrows.splice(index, 1);
   syncResultantIfVisible();
@@ -614,6 +706,7 @@ function clearArrows() {
   for (const arrow of arrows) {
     arrow.group.remove();
     arrow.label.remove();
+    if (arrow.jetMotor) arrow.jetMotor.remove();
   }
   arrows.length = 0;
 }
@@ -621,6 +714,7 @@ function clearArrows() {
 function stopAnimation() {
   animating = false;
   lastFrameTime = null;
+  syncJetMotors();
   if (animationFrameId !== null) {
     cancelAnimationFrame(animationFrameId);
     animationFrameId = null;
@@ -703,6 +797,7 @@ function startSimulation() {
   simulationForce = { fx, fy };
   velocity = { x: 0, y: 0 };
   lastFrameTime = null;
+  syncJetMotors();
   updateButtons();
 
   function step(now) {
@@ -823,5 +918,9 @@ startBtn.addEventListener("click", startSimulation);
 resultantBtn.addEventListener("click", toggleResultantConstruction);
 snap90Btn.addEventListener("click", toggleSnap90);
 resetBtn.addEventListener("click", resetSimulation);
+
+loadJetMotorTemplate().then(() => {
+  syncJetMotors();
+});
 
 updateButtons();
