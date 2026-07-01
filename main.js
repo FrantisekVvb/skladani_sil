@@ -23,7 +23,9 @@ const JET_NOZZLE_RIGHT = 156;
 const JET_HEIGHT = 72;
 const JET_WIDTH = 160;
 const JET_SCALE_MIN = 0.09;
-const JET_SCALE_LOG_FACTOR = 0.1;
+const JET_SCALE_LINEAR_FACTOR = 0.0055;
+const JET_SCALE_LOG_FACTOR = 0.05;
+const JET_SCALE_LOG_WEIGHT = 0.75;
 const arrows = [];
 
 let drag = null;
@@ -107,7 +109,13 @@ function ensureJetMotor(arrow) {
 }
 
 function getJetScale(magnitude) {
-  return JET_SCALE_MIN + JET_SCALE_LOG_FACTOR * Math.log10(magnitude);
+  const linear = JET_SCALE_LINEAR_FACTOR * magnitude;
+  const logarithmic = JET_SCALE_LOG_FACTOR * Math.log10(magnitude);
+  return (
+    JET_SCALE_MIN +
+    (1 - JET_SCALE_LOG_WEIGHT) * linear +
+    JET_SCALE_LOG_WEIGHT * logarithmic
+  );
 }
 
 function updateJetMotor(arrow) {
