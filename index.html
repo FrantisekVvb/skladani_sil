@@ -12,28 +12,38 @@
   <body>
     <main class="stage" aria-label="Skládání sil">
       <div class="simulation">
-        <div id="object-wrap" class="object-wrap">
-          <svg
-            class="tile"
-            width="75"
-            height="51"
-            viewBox="0 0 75 51"
-            fill="none"
-            xmlns="http://www.w3.org/2000/svg"
-            aria-label="Objekt"
-            role="img"
-          >
-            <g id="object-hit" class="object-hit">
-              <circle cx="37.0547" cy="25.4297" r="25.4297" fill="#803B50" />
-              <g id="plus" class="plus" fill="#000000" aria-hidden="true">
-                <rect x="24.5" y="23.5" width="26" height="4" rx="2" />
-                <rect x="35.5" y="12.5" width="4" height="26" rx="2" />
+        <div id="objects-stage" class="objects-stage">
+          <div class="object-wrap">
+            <svg
+              class="tile"
+              width="75"
+              height="51"
+              viewBox="0 0 75 51"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+              aria-label="Objekt"
+              role="img"
+            >
+              <g class="object-hit">
+                <circle cx="37.0547" cy="25.4297" r="25.4297" fill="#803B50" />
+                <g class="plus" fill="#000000" aria-hidden="true">
+                  <rect x="24.5" y="23.5" width="26" height="4" rx="2" />
+                  <rect x="35.5" y="12.5" width="4" height="26" rx="2" />
+                </g>
               </g>
-            </g>
-          </svg>
+            </svg>
+          </div>
         </div>
       </div>
       <div class="controls">
+        <button
+          id="circles-toggle-btn"
+          class="action-btn circles-toggle-btn"
+          type="button"
+          aria-pressed="false"
+        >
+          1 kruh
+        </button>
         <button id="snap90-btn" class="action-btn snap90-btn" type="button" aria-pressed="false">
           90°
         </button>
@@ -47,6 +57,58 @@
         </button>
         <button id="start-btn" class="action-btn start-btn" type="button">Spustit</button>
         <button id="reset-btn" class="action-btn reset-btn" type="button">Reset</button>
+      </div>
+      <div id="force-keypad-overlay" class="force-keypad-overlay" hidden>
+        <div
+          class="force-keypad-panel"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="force-keypad-title"
+        >
+          <div class="force-keypad-panel__header">
+            <h2 id="force-keypad-title" class="force-keypad-panel__title">Velikost síly (N)</h2>
+            <button
+              id="force-keypad-close"
+              class="force-keypad-panel__close"
+              type="button"
+              aria-label="Zavřít"
+            >
+              ×
+            </button>
+          </div>
+          <div
+            id="force-keypad-display"
+            class="force-keypad-panel__display"
+            aria-live="polite"
+          ></div>
+          <div class="math-keypad" id="force-math-keypad" aria-label="Matematická klávesnice">
+            <div class="math-keypad__grid">
+              <button class="math-keypad__key" type="button" data-value="7">7</button>
+              <button class="math-keypad__key" type="button" data-value="8">8</button>
+              <button class="math-keypad__key" type="button" data-value="9">9</button>
+              <button class="math-keypad__key" type="button" data-value="4">4</button>
+              <button class="math-keypad__key" type="button" data-value="5">5</button>
+              <button class="math-keypad__key" type="button" data-value="6">6</button>
+              <button class="math-keypad__key" type="button" data-value="1">1</button>
+              <button class="math-keypad__key" type="button" data-value="2">2</button>
+              <button class="math-keypad__key" type="button" data-value="3">3</button>
+              <button class="math-keypad__key math-keypad__key--zero" type="button" data-value="0">
+                0
+              </button>
+              <button
+                class="math-keypad__key math-keypad__key--wide"
+                type="button"
+                data-action="backspace"
+                aria-label="Smazat"
+              >
+                ⌫
+              </button>
+            </div>
+          </div>
+          <button id="force-keypad-confirm" class="action-btn force-keypad-panel__confirm" type="button">
+            Potvrdit
+          </button>
+        </div>
       </div>
     </main>
     <script src="main.js"></script>

@@ -1,17 +1,34 @@
-const svg = document.querySelector("svg.tile");
-const plus = document.getElementById("plus");
-const objectHit = document.getElementById("object-hit");
-const objectWrap = document.getElementById("object-wrap");
+const SVG_NS = "http://www.w3.org/2000/svg";
+const objectsStage = document.getElementById("objects-stage");
 const startBtn = document.getElementById("start-btn");
 const resetBtn = document.getElementById("reset-btn");
 const resultantBtn = document.getElementById("resultant-btn");
 const snap90Btn = document.getElementById("snap90-btn");
+const circlesToggleBtn = document.getElementById("circles-toggle-btn");
+const forceKeypadOverlay = document.getElementById("force-keypad-overlay");
+const forceKeypadDisplay = document.getElementById("force-keypad-display");
+const forceKeypadClose = document.getElementById("force-keypad-close");
+const forceKeypadConfirm = document.getElementById("force-keypad-confirm");
+const forceKeypadKeys = document.querySelectorAll("#force-math-keypad .math-keypad__key");
 
-if (!svg || !plus || !objectHit || !objectWrap || !startBtn || !resetBtn || !resultantBtn || !snap90Btn) {
+if (
+  !objectsStage ||
+  !startBtn ||
+  !resetBtn ||
+  !resultantBtn ||
+  !snap90Btn ||
+  !circlesToggleBtn ||
+  !forceKeypadOverlay ||
+  !forceKeypadDisplay ||
+  !forceKeypadClose ||
+  !forceKeypadConfirm
+) {
   throw new Error("Missing required elements.");
 }
 
 const MAX_ARROWS = 5;
+const MAX_FORCE_DIGITS = 3;
+const SECOND_OBJECT_OFFSET = { x: 0, y: 100 };
 const OBJECT_MASS = 1;
 const ACCEL_SCALE = 3;
 const FORCE_STEP = 1;
@@ -29,23 +46,22 @@ const JET_SCALE_MIN = 0.09;
 const JET_SCALE_LINEAR_FACTOR = 0.0055;
 const JET_SCALE_LOG_FACTOR = 0.05;
 const JET_SCALE_LOG_WEIGHT = 0.75;
-const arrows = [];
+
+const objects = [];
 
 let drag = null;
 let animating = false;
 let constructionAnimating = false;
 let animationFrameId = null;
-let constructionGroup = null;
-let position = { x: 0, y: 0 };
-let velocity = { x: 0, y: 0 };
-let simulationForce = { fx: 0, fy: 0 };
 let lastFrameTime = null;
 let snap90Active = false;
+let twoCirclesActive = false;
 let resultantVisible = false;
+let forceEdit = null;
 let jetMotorTemplate = null;
 let jetMotorCounter = 0;
 
-function clientToSvgPoint(clientX, clientY) {
+function clientToSvgPoint(svg, clientX, clientY) {
   const rect = svg.getBoundingClientRect();
   const viewBox = svg.viewBox.baseVal;
   if (rect.width === 0 || rect.height === 0) return { x: 0, y: 0 };
@@ -60,27 +76,31 @@ function isPrimaryPointerDown(e) {
   return e.pointerType !== "mouse" || e.button === 0;
 }
 
-function findArrowByTipPoint(x, y) {
-  let bestArrow = null;
+function findArrowByTipPoint(clientX, clientY) {
+  let bestMatch = null;
   let bestDistance = TIP_HANDLE_RADIUS;
 
-  for (const arrow of arrows) {
-    if (!arrow.force || arrow.tipHandle.getAttribute("display") === "none") continue;
+  for (const obj of objects) {
+    const p = clientToSvgPoint(obj.svg, clientX, clientY);
 
-    const tipX = Number(arrow.tipHandle.getAttribute("cx"));
-    const tipY = Number(arrow.tipHandle.getAttribute("cy"));
-    const distance = Math.hypot(x - tipX, y - tipY);
+    for (const arrow of obj.arrows) {
+      if (!arrow.force || arrow.tipHandle.getAttribute("display") === "none") continue;
 
-    if (distance <= bestDistance) {
-      bestArrow = arrow;
-      bestDistance = distance;
+      const tipX = Number(arrow.tipHandle.getAttribute("cx"));
+      const tipY = Number(arrow.tipHandle.getAttribute("cy"));
+      const distance = Math.hypot(p.x - tipX, p.y - tipY);
+
+      if (distance <= bestDistance) {
+        bestMatch = { obj, arrow };
+        bestDistance = distance;
+      }
     }
   }
 
-  return bestArrow;
+  return bestMatch;
 }
 
-function beginPointerCapture(e) {
+function beginPointerCapture(svg, e) {
   if (typeof svg.setPointerCapture === "function") {
     svg.setPointerCapture(e.pointerId);
   }
@@ -95,7 +115,7 @@ function shouldUpdateTipDrag(dragState, x, y) {
   return moved;
 }
 
-function releasePointerCaptureSafe(pointerId) {
+function releasePointerCaptureSafe(svg, pointerId) {
   if (typeof svg.releasePointerCapture !== "function") return;
 
   try {
@@ -105,13 +125,155 @@ function releasePointerCaptureSafe(pointerId) {
   }
 }
 
-function getPlusCenter() {
+function getPlusCenter(plus) {
   const b = plus.getBBox();
   return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
 }
 
-function getArrowOrigin() {
-  return getPlusCenter();
+function getArrowOrigin(obj) {
+  return getPlusCenter(obj.plus);
+}
+
+function applyPosition(obj) {
+  const x = obj.baseOffset.x + obj.position.x;
+  const y = obj.baseOffset.y + obj.position.y;
+  obj.wrap.style.transform = `translate(calc(-50% + ${x}px), calc(-50% + ${y}px))`;
+}
+
+function createObjectSvg() {
+  const svgEl = document.createElementNS(SVG_NS, "svg");
+  svgEl.setAttribute("class", "tile");
+  svgEl.setAttribute("width", "75");
+  svgEl.setAttribute("height", "51");
+  svgEl.setAttribute("viewBox", "0 0 75 51");
+  svgEl.setAttribute("fill", "none");
+  svgEl.setAttribute("aria-label", "Objekt");
+  svgEl.setAttribute("role", "img");
+
+  const hit = document.createElementNS(SVG_NS, "g");
+  hit.setAttribute("class", "object-hit");
+
+  const circle = document.createElementNS(SVG_NS, "circle");
+  circle.setAttribute("cx", "37.0547");
+  circle.setAttribute("cy", "25.4297");
+  circle.setAttribute("r", "25.4297");
+  circle.setAttribute("fill", "#803B50");
+
+  const plus = document.createElementNS(SVG_NS, "g");
+  plus.setAttribute("class", "plus");
+  plus.setAttribute("fill", "#000000");
+  plus.setAttribute("aria-hidden", "true");
+
+  const rectH = document.createElementNS(SVG_NS, "rect");
+  rectH.setAttribute("x", "24.5");
+  rectH.setAttribute("y", "23.5");
+  rectH.setAttribute("width", "26");
+  rectH.setAttribute("height", "4");
+  rectH.setAttribute("rx", "2");
+
+  const rectV = document.createElementNS(SVG_NS, "rect");
+  rectV.setAttribute("x", "35.5");
+  rectV.setAttribute("y", "12.5");
+  rectV.setAttribute("width", "4");
+  rectV.setAttribute("height", "26");
+  rectV.setAttribute("rx", "2");
+
+  plus.appendChild(rectH);
+  plus.appendChild(rectV);
+  hit.appendChild(circle);
+  hit.appendChild(plus);
+  svgEl.appendChild(hit);
+
+  return { svg: svgEl, hit, plus };
+}
+
+function createObject(baseOffsetX, baseOffsetY) {
+  const wrap = document.createElement("div");
+  wrap.className = "object-wrap";
+
+  const { svg, hit, plus } = createObjectSvg();
+  wrap.appendChild(svg);
+
+  const obj = {
+    wrap,
+    svg,
+    hit,
+    plus,
+    arrows: [],
+    constructionGroup: null,
+    baseOffset: { x: baseOffsetX, y: baseOffsetY },
+    position: { x: 0, y: 0 },
+    velocity: { x: 0, y: 0 },
+    simulationForce: { fx: 0, fy: 0 },
+  };
+
+  objectsStage.appendChild(wrap);
+  objects.push(obj);
+  applyPosition(obj);
+  bindObjectEvents(obj);
+  return obj;
+}
+
+function initObjectFromWrap(wrap, baseOffsetX, baseOffsetY) {
+  const svg = wrap.querySelector("svg.tile");
+  const hit = wrap.querySelector(".object-hit");
+  const plus = wrap.querySelector(".plus");
+
+  if (!svg || !hit || !plus) {
+    throw new Error("Invalid object wrap.");
+  }
+
+  const obj = {
+    wrap,
+    svg,
+    hit,
+    plus,
+    arrows: [],
+    constructionGroup: null,
+    baseOffset: { x: baseOffsetX, y: baseOffsetY },
+    position: { x: 0, y: 0 },
+    velocity: { x: 0, y: 0 },
+    simulationForce: { fx: 0, fy: 0 },
+  };
+
+  objects.push(obj);
+  applyPosition(obj);
+  return obj;
+}
+
+function bindObjectEvents(obj) {
+  obj.hit.addEventListener("pointerdown", (e) => onObjectPointerDown(e, obj));
+  obj.svg.addEventListener("pointerdown", (e) => onSvgPointerDown(e, obj));
+  obj.svg.addEventListener("pointermove", onPointerMove);
+  obj.svg.addEventListener("pointerup", endDrag);
+  obj.svg.addEventListener("pointercancel", endDrag);
+}
+
+function syncCircleCount() {
+  if (twoCirclesActive && objects.length < 2) {
+    createObject(SECOND_OBJECT_OFFSET.x, SECOND_OBJECT_OFFSET.y);
+    return;
+  }
+
+  while (!twoCirclesActive && objects.length > 1) {
+    removeObject(objects[objects.length - 1]);
+  }
+}
+
+function updateCirclesToggleUi() {
+  circlesToggleBtn.textContent = twoCirclesActive ? "2 kruhy" : "1 kruh";
+  circlesToggleBtn.classList.toggle("is-active", twoCirclesActive);
+  circlesToggleBtn.setAttribute("aria-pressed", String(twoCirclesActive));
+}
+
+function toggleTwoCircles() {
+  if (animating || constructionAnimating) return;
+
+  twoCirclesActive = !twoCirclesActive;
+  updateCirclesToggleUi();
+  syncCircleCount();
+  syncResultantIfVisible();
+  updateButtons();
 }
 
 async function loadJetMotorTemplate() {
@@ -122,7 +284,7 @@ async function loadJetMotorTemplate() {
 }
 
 function createJetMotorGraphic(uniqueId) {
-  const nested = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  const nested = document.createElementNS(SVG_NS, "svg");
   nested.setAttribute("width", String(JET_WIDTH));
   nested.setAttribute("height", String(JET_HEIGHT));
   nested.setAttribute("viewBox", "0 0 160 72");
@@ -148,16 +310,16 @@ function createJetMotorGraphic(uniqueId) {
   return nested;
 }
 
-function ensureJetMotor(arrow) {
+function ensureJetMotor(obj, arrow) {
   if (arrow.jetMotor || !jetMotorTemplate) return;
 
   const uniqueId = ++jetMotorCounter;
-  const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
+  const group = document.createElementNS(SVG_NS, "g");
   group.setAttribute("class", "jet-motor");
   group.setAttribute("visibility", "hidden");
   group.setAttribute("aria-hidden", "true");
   group.appendChild(createJetMotorGraphic(uniqueId));
-  objectHit.insertBefore(group, plus);
+  obj.hit.insertBefore(group, obj.plus);
   arrow.jetMotor = group;
 }
 
@@ -171,17 +333,17 @@ function getJetScale(magnitude) {
   );
 }
 
-function updateJetMotor(arrow) {
+function updateJetMotor(obj, arrow) {
   if (!arrow.force || !animating) {
     if (arrow.jetMotor) arrow.jetMotor.setAttribute("visibility", "hidden");
     return;
   }
 
-  ensureJetMotor(arrow);
+  ensureJetMotor(obj, arrow);
   if (!arrow.jetMotor) return;
 
   const angle = Math.atan2(arrow.force.dy, arrow.force.dx);
-  const origin = getArrowOrigin();
+  const origin = getArrowOrigin(obj);
   const mountX = origin.x - Math.cos(angle) * CIRCLE_R;
   const mountY = origin.y - Math.sin(angle) * CIRCLE_R;
   const deg = (angle * 180) / Math.PI;
@@ -196,13 +358,120 @@ function updateJetMotor(arrow) {
 }
 
 function syncJetMotors() {
-  for (const arrow of arrows) {
-    updateJetMotor(arrow);
+  for (const obj of objects) {
+    for (const arrow of obj.arrows) {
+      updateJetMotor(obj, arrow);
+    }
   }
 }
 
 function formatForce(newtons) {
   return `${Math.round(newtons)} N`;
+}
+
+function setArrowMagnitude(obj, arrow, magnitude) {
+  if (!arrow.force) return;
+
+  const origin = getArrowOrigin(obj);
+  const snappedLen = snapForceLength(magnitude);
+
+  if (snappedLen === 0) {
+    updateArrow(obj, arrow, origin.x, origin.y, origin.x, origin.y);
+    return;
+  }
+
+  const angle = Math.atan2(arrow.force.dy, arrow.force.dx);
+  const toX = origin.x + Math.cos(angle) * snappedLen;
+  const toY = origin.y + Math.sin(angle) * snappedLen;
+  updateArrow(obj, arrow, origin.x, origin.y, toX, toY);
+}
+
+function isValidForceInput(value) {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isInteger(parsed) && parsed >= MIN_FORCE;
+}
+
+function updateForceKeypadDisplay() {
+  if (!forceEdit) return;
+
+  const showInvalid = forceEdit.value !== "" && !isValidForceInput(forceEdit.value);
+  forceKeypadDisplay.textContent = forceEdit.value ? `${forceEdit.value} N` : "";
+  forceKeypadDisplay.classList.toggle("is-invalid", showInvalid);
+}
+
+function openForceKeypad(obj, arrow) {
+  if (!arrow.force || animating || constructionAnimating || drag) return;
+
+  forceEdit = {
+    obj,
+    arrow,
+    value: "",
+  };
+
+  forceKeypadOverlay.hidden = false;
+  updateForceKeypadDisplay();
+  updateButtons();
+  forceKeypadConfirm.focus();
+}
+
+function closeForceKeypad() {
+  forceEdit = null;
+  forceKeypadOverlay.hidden = true;
+  forceKeypadDisplay.classList.remove("is-invalid");
+  updateButtons();
+}
+
+function insertIntoForceValue(digit) {
+  if (!forceEdit) return;
+  if (forceEdit.value.length >= MAX_FORCE_DIGITS) return;
+
+  forceEdit.value = forceEdit.value === "0" ? digit : `${forceEdit.value}${digit}`;
+  updateForceKeypadDisplay();
+}
+
+function backspaceForceValue() {
+  if (!forceEdit) return;
+  forceEdit.value = forceEdit.value.slice(0, -1);
+  updateForceKeypadDisplay();
+}
+
+function confirmForceKeypad() {
+  if (!forceEdit) return;
+
+  if (!isValidForceInput(forceEdit.value)) {
+    forceKeypadDisplay.classList.add("is-invalid");
+    return;
+  }
+
+  const magnitude = Number.parseInt(forceEdit.value, 10);
+  const { obj, arrow } = forceEdit;
+  setArrowMagnitude(obj, arrow, magnitude);
+  closeForceKeypad();
+  updateButtons();
+}
+
+function handleForceKeypadClick(event) {
+  const key = event.currentTarget;
+  const action = key.dataset.action;
+  const value = key.dataset.value;
+
+  if (action === "backspace") {
+    backspaceForceValue();
+    return;
+  }
+
+  if (value) {
+    insertIntoForceValue(value);
+  }
+}
+
+function onForceLabelPointerDown(e, obj, arrow) {
+  if (!isPrimaryPointerDown(e) || animating || constructionAnimating || drag || forceEdit) return;
+  if (!arrow.force) return;
+
+  e.preventDefault();
+  e.stopPropagation();
+  openForceKeypad(obj, arrow);
 }
 
 function snapForceLength(len) {
@@ -252,7 +521,7 @@ function getForceLabelLayout(tipX, tipY, angle) {
   return { labelX, labelY, labelAngle, textAnchor };
 }
 
-function applyForceLabel(label, tipX, tipY, angle, magnitude) {
+function applyForceLabel(label, labelHit, tipX, tipY, angle, magnitude) {
   const { labelX, labelY, labelAngle, textAnchor } = getForceLabelLayout(
     tipX,
     tipY,
@@ -265,9 +534,18 @@ function applyForceLabel(label, tipX, tipY, angle, magnitude) {
   label.setAttribute("dominant-baseline", "middle");
   label.setAttribute("transform", `rotate(${labelAngle} ${labelX} ${labelY})`);
   label.textContent = formatForce(magnitude);
+
+  if (!labelHit) return;
+
+  const padding = 6;
+  const bounds = label.getBBox();
+  labelHit.setAttribute("x", String(bounds.x - padding));
+  labelHit.setAttribute("y", String(bounds.y - padding));
+  labelHit.setAttribute("width", String(bounds.width + padding * 2));
+  labelHit.setAttribute("height", String(bounds.height + padding * 2));
 }
 
-function updateArrow(arrow, fromX, fromY, toX, toY) {
+function updateArrow(obj, arrow, fromX, fromY, toX, toY) {
   const snappedTip = snapTipToAxis(fromX, fromY, toX, toY);
   toX = snappedTip.toX;
   toY = snappedTip.toY;
@@ -279,9 +557,9 @@ function updateArrow(arrow, fromX, fromY, toX, toY) {
 
   if (snappedLen === 0) {
     arrow.group.setAttribute("display", "none");
-    arrow.label.setAttribute("display", "none");
+    arrow.labelGroup.setAttribute("display", "none");
     arrow.force = null;
-    updateJetMotor(arrow);
+    updateJetMotor(obj, arrow);
     syncResultantIfVisible();
     return false;
   }
@@ -323,18 +601,18 @@ function updateArrow(arrow, fromX, fromY, toX, toY) {
   arrow.tipHandle.setAttribute("cy", String(tipY));
   arrow.tipHandle.removeAttribute("display");
 
-  applyForceLabel(arrow.label, tipX, tipY, angle, snappedLen);
-  arrow.label.removeAttribute("display");
-  svg.appendChild(arrow.label);
+  arrow.labelGroup.removeAttribute("display");
+  obj.svg.appendChild(arrow.labelGroup);
+  applyForceLabel(arrow.label, arrow.labelHit, tipX, tipY, angle, snappedLen);
 
   arrow.force = { dx: forceDx, dy: forceDy, magnitude: snappedLen };
-  updateJetMotor(arrow);
+  updateJetMotor(obj, arrow);
   syncResultantIfVisible();
   return true;
 }
 
-function createArrow() {
-  const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+function createArrow(obj) {
+  const g = document.createElementNS(SVG_NS, "g");
   g.setAttribute("class", "force-arrow");
   g.setAttribute("fill", "none");
   g.setAttribute("stroke", "#00805B");
@@ -343,44 +621,76 @@ function createArrow() {
   g.setAttribute("stroke-linejoin", "round");
   g.setAttribute("aria-hidden", "true");
 
-  const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
-  const headA = document.createElementNS("http://www.w3.org/2000/svg", "line");
-  const headB = document.createElementNS("http://www.w3.org/2000/svg", "line");
-  const tipHandle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+  const line = document.createElementNS(SVG_NS, "line");
+  const headA = document.createElementNS(SVG_NS, "line");
+  const headB = document.createElementNS(SVG_NS, "line");
+  const tipHandle = document.createElementNS(SVG_NS, "circle");
   tipHandle.setAttribute("class", "arrow-tip-handle");
   tipHandle.setAttribute("r", String(TIP_HANDLE_RADIUS));
   tipHandle.setAttribute("fill", "transparent");
   tipHandle.setAttribute("stroke", "none");
-  const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+  const labelGroup = document.createElementNS(SVG_NS, "g");
+  labelGroup.setAttribute("class", "force-label-group");
+  labelGroup.setAttribute("display", "none");
+
+  const labelHit = document.createElementNS(SVG_NS, "rect");
+  labelHit.setAttribute("class", "force-label-hit");
+  labelHit.setAttribute("fill", "transparent");
+  labelHit.setAttribute("stroke", "none");
+
+  const label = document.createElementNS(SVG_NS, "text");
   label.setAttribute("class", "force-label");
   label.setAttribute("stroke", "none");
+
+  labelGroup.appendChild(labelHit);
+  labelGroup.appendChild(label);
 
   g.appendChild(line);
   g.appendChild(headA);
   g.appendChild(headB);
   g.appendChild(tipHandle);
-  svg.appendChild(g);
-  svg.appendChild(label);
+  obj.svg.appendChild(g);
+  obj.svg.appendChild(labelGroup);
 
-  tipHandle.addEventListener("pointerdown", onTipPointerDown);
+  const arrow = {
+    group: g,
+    line,
+    headA,
+    headB,
+    tipHandle,
+    labelGroup,
+    label,
+    labelHit,
+    jetMotor: null,
+    force: null,
+    obj,
+  };
 
-  return { group: g, line, headA, headB, tipHandle, label, jetMotor: null, force: null };
+  labelGroup.addEventListener("pointerdown", (e) => onForceLabelPointerDown(e, obj, arrow));
+  tipHandle.addEventListener("pointerdown", (e) => onTipPointerDown(e, obj, arrow));
+
+  return arrow;
 }
 
-function removeArrow(arrow) {
+function removeArrow(obj, arrow) {
+  if (forceEdit && forceEdit.arrow === arrow) closeForceKeypad();
   arrow.group.remove();
-  arrow.label.remove();
+  arrow.labelGroup.remove();
   if (arrow.jetMotor) arrow.jetMotor.remove();
-  const index = arrows.indexOf(arrow);
-  if (index >= 0) arrows.splice(index, 1);
+  const index = obj.arrows.indexOf(arrow);
+  if (index >= 0) obj.arrows.splice(index, 1);
   syncResultantIfVisible();
   updateButtons();
 }
 
-function getForceVectors() {
-  return arrows
+function getForceVectors(obj) {
+  return obj.arrows
     .filter((arrow) => arrow.force)
     .map((arrow) => ({ dx: arrow.force.dx, dy: arrow.force.dy }));
+}
+
+function hasAnyArrows() {
+  return objects.some((obj) => obj.arrows.length > 0);
 }
 
 function shouldSkipParallelogramAnimation(forces) {
@@ -396,31 +706,32 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function clearConstructionOnly() {
-  if (constructionGroup) {
-    constructionGroup.remove();
-    constructionGroup = null;
+function clearConstructionOnly(obj) {
+  if (obj.constructionGroup) {
+    obj.constructionGroup.remove();
+    obj.constructionGroup = null;
   }
 }
 
 function clearConstruction() {
-  clearConstructionOnly();
+  for (const obj of objects) {
+    clearConstructionOnly(obj);
+  }
   constructionAnimating = false;
   resultantVisible = false;
 }
 
-function ensureConstructionGroup() {
-  if (constructionGroup) return constructionGroup;
+function ensureConstructionGroup(obj) {
+  if (obj.constructionGroup) return obj.constructionGroup;
 
-  constructionGroup = document.createElementNS("http://www.w3.org/2000/svg", "g");
-  constructionGroup.setAttribute("id", "force-construction");
-  constructionGroup.setAttribute("class", "force-construction");
-  svg.appendChild(constructionGroup);
-  return constructionGroup;
+  obj.constructionGroup = document.createElementNS(SVG_NS, "g");
+  obj.constructionGroup.setAttribute("class", "force-construction");
+  obj.svg.appendChild(obj.constructionGroup);
+  return obj.constructionGroup;
 }
 
-function createConstructionLine(x1, y1, x2, y2, dashed = true) {
-  const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+function createConstructionLine(obj, x1, y1, x2, y2, dashed = true) {
+  const line = document.createElementNS(SVG_NS, "line");
   line.setAttribute("x1", String(x1));
   line.setAttribute("y1", String(y1));
   line.setAttribute("x2", String(x2));
@@ -430,7 +741,7 @@ function createConstructionLine(x1, y1, x2, y2, dashed = true) {
   line.setAttribute("stroke-linecap", "round");
   line.setAttribute("fill", "none");
   if (dashed) line.setAttribute("stroke-dasharray", "6 4");
-  ensureConstructionGroup().appendChild(line);
+  ensureConstructionGroup(obj).appendChild(line);
   return line;
 }
 
@@ -474,8 +785,8 @@ function addOpenArrowHead(group, tipX, tipY, angle, color, strokeWidth = 2.5) {
   const a1 = angle + Math.PI - headAngle;
   const a2 = angle + Math.PI + headAngle;
 
-  const headA = document.createElementNS("http://www.w3.org/2000/svg", "line");
-  const headB = document.createElementNS("http://www.w3.org/2000/svg", "line");
+  const headA = document.createElementNS(SVG_NS, "line");
+  const headB = document.createElementNS(SVG_NS, "line");
 
   for (const head of [headA, headB]) {
     head.setAttribute("stroke", color);
@@ -499,18 +810,18 @@ function addOpenArrowHead(group, tipX, tipY, angle, color, strokeWidth = 2.5) {
 }
 
 function positionResultantLabel(label, tipX, tipY, angle, magnitude) {
-  applyForceLabel(label, tipX, tipY, angle, magnitude);
+  applyForceLabel(label, null, tipX, tipY, angle, magnitude);
 }
 
-function renderResultantArrow(origin, partialX, partialY) {
+function renderResultantArrow(obj, origin, partialX, partialY) {
   const { fx, fy, magnitude } = applyResultantThreshold(partialX, partialY);
   const resultantEnd = {
     x: origin.x + fx,
     y: origin.y + fy,
   };
   const angle = Math.atan2(fy, fx);
-  const group = ensureConstructionGroup();
-  const resultantLine = document.createElementNS("http://www.w3.org/2000/svg", "line");
+  const group = ensureConstructionGroup(obj);
+  const resultantLine = document.createElementNS(SVG_NS, "line");
   resultantLine.setAttribute("class", "resultant-arrow");
   resultantLine.setAttribute("x1", String(origin.x));
   resultantLine.setAttribute("y1", String(origin.y));
@@ -531,7 +842,7 @@ function renderResultantArrow(origin, partialX, partialY) {
     3
   );
 
-  const resultantLabel = document.createElementNS("http://www.w3.org/2000/svg", "text");
+  const resultantLabel = document.createElementNS(SVG_NS, "text");
   resultantLabel.setAttribute("class", "resultant-label");
   resultantLabel.setAttribute("stroke", "none");
   positionResultantLabel(
@@ -544,7 +855,7 @@ function renderResultantArrow(origin, partialX, partialY) {
   group.appendChild(resultantLabel);
 }
 
-function renderParallelogramLines(origin, forces) {
+function renderParallelogramLines(obj, origin, forces) {
   let partialX = 0;
   let partialY = 0;
 
@@ -564,8 +875,9 @@ function renderParallelogramLines(origin, forces) {
         x: origin.x + force.dx,
         y: origin.y + force.dy,
       };
-      createConstructionLine(start.x, start.y, end.x, end.y, true);
+      createConstructionLine(obj, start.x, start.y, end.x, end.y, true);
       createConstructionLine(
+        obj,
         parallelStart.x,
         parallelStart.y,
         end.x,
@@ -581,22 +893,19 @@ function renderParallelogramLines(origin, forces) {
   return { partialX, partialY };
 }
 
-function renderResultantConstruction() {
-  const forces = getForceVectors();
-  clearConstructionOnly();
+function renderResultantConstruction(obj) {
+  const forces = getForceVectors(obj);
+  clearConstructionOnly(obj);
 
-  if (forces.length === 0) {
-    resultantVisible = false;
-    return;
-  }
+  if (forces.length === 0) return;
 
-  const origin = getArrowOrigin();
+  const origin = getArrowOrigin(obj);
   const skipParallelogram = shouldSkipParallelogramAnimation(forces);
   let partialX = 0;
   let partialY = 0;
 
   if (!skipParallelogram) {
-    ({ partialX, partialY } = renderParallelogramLines(origin, forces));
+    ({ partialX, partialY } = renderParallelogramLines(obj, origin, forces));
   } else {
     for (const force of forces) {
       partialX += force.dx;
@@ -604,24 +913,35 @@ function renderResultantConstruction() {
     }
   }
 
-  renderResultantArrow(origin, partialX, partialY);
-  resultantVisible = true;
+  renderResultantArrow(obj, origin, partialX, partialY);
 }
 
 function syncResultantIfVisible() {
   if (!resultantVisible || constructionAnimating || animating) return;
-  renderResultantConstruction();
+
+  let anyForces = false;
+  for (const obj of objects) {
+    const forces = getForceVectors(obj);
+    if (forces.length > 0) {
+      anyForces = true;
+      renderResultantConstruction(obj);
+    } else {
+      clearConstructionOnly(obj);
+    }
+  }
+
+  if (!anyForces) resultantVisible = false;
 }
 
-async function drawResultantArrow(origin, partialX, partialY, animate = true) {
+async function drawResultantArrow(obj, origin, partialX, partialY, animate = true) {
   const { fx, fy, magnitude } = applyResultantThreshold(partialX, partialY);
   const resultantEnd = {
     x: origin.x + fx,
     y: origin.y + fy,
   };
   const angle = Math.atan2(fy, fx);
-  const group = ensureConstructionGroup();
-  const resultantLine = document.createElementNS("http://www.w3.org/2000/svg", "line");
+  const group = ensureConstructionGroup(obj);
+  const resultantLine = document.createElementNS(SVG_NS, "line");
   resultantLine.setAttribute("class", "resultant-arrow");
   resultantLine.setAttribute("x1", String(origin.x));
   resultantLine.setAttribute("y1", String(origin.y));
@@ -646,7 +966,7 @@ async function drawResultantArrow(origin, partialX, partialY, animate = true) {
     3
   );
 
-  const resultantLabel = document.createElementNS("http://www.w3.org/2000/svg", "text");
+  const resultantLabel = document.createElementNS(SVG_NS, "text");
   resultantLabel.setAttribute("class", "resultant-label");
   resultantLabel.setAttribute("stroke", "none");
   positionResultantLabel(
@@ -659,15 +979,13 @@ async function drawResultantArrow(origin, partialX, partialY, animate = true) {
   group.appendChild(resultantLabel);
 }
 
-async function animateResultantConstruction() {
-  const forces = getForceVectors();
-  if (constructionAnimating || animating || forces.length === 0) return;
+async function animateObjectResultantConstruction(obj) {
+  const forces = getForceVectors(obj);
+  if (forces.length === 0) return;
 
-  clearConstruction();
-  constructionAnimating = true;
-  updateButtons();
+  clearConstructionOnly(obj);
 
-  const origin = getArrowOrigin();
+  const origin = getArrowOrigin(obj);
   const skipParallelogram = shouldSkipParallelogramAnimation(forces);
   let partialX = 0;
   let partialY = 0;
@@ -690,6 +1008,7 @@ async function animateResultantConstruction() {
           y: origin.y + force.dy,
         };
         const translated = createConstructionLine(
+          obj,
           start.x,
           start.y,
           end.x,
@@ -700,6 +1019,7 @@ async function animateResultantConstruction() {
         await sleep(120);
 
         const parallel = createConstructionLine(
+          obj,
           parallelStart.x,
           parallelStart.y,
           end.x,
@@ -720,7 +1040,20 @@ async function animateResultantConstruction() {
     }
   }
 
-  await drawResultantArrow(origin, partialX, partialY, !skipParallelogram);
+  await drawResultantArrow(obj, origin, partialX, partialY, !skipParallelogram);
+}
+
+async function animateResultantConstruction() {
+  const objectsWithForces = objects.filter((obj) => getForceVectors(obj).length > 0);
+  if (constructionAnimating || animating || objectsWithForces.length === 0) return;
+
+  clearConstruction();
+  constructionAnimating = true;
+  updateButtons();
+
+  await Promise.all(
+    objectsWithForces.map((obj) => animateObjectResultantConstruction(obj))
+  );
 
   resultantVisible = true;
   constructionAnimating = false;
@@ -747,11 +1080,11 @@ function applyResultantThreshold(fx, fy) {
   return { fx, fy, magnitude };
 }
 
-function getResultantForce() {
+function getResultantForce(obj) {
   let fx = 0;
   let fy = 0;
 
-  for (const arrow of arrows) {
+  for (const arrow of obj.arrows) {
     if (!arrow.force) continue;
     fx += arrow.force.dx;
     fy += arrow.force.dy;
@@ -761,21 +1094,43 @@ function getResultantForce() {
 }
 
 function updateButtons() {
-  const interactionLocked = animating || constructionAnimating;
-  startBtn.disabled = interactionLocked || arrows.length === 0;
-  resultantBtn.disabled = interactionLocked || arrows.length === 0;
-  snap90Btn.disabled = animating;
+  const interactionLocked = animating || constructionAnimating || forceEdit !== null;
+  startBtn.disabled = interactionLocked || !hasAnyArrows();
+  resultantBtn.disabled = interactionLocked || !hasAnyArrows();
+  snap90Btn.disabled = animating || forceEdit !== null;
+  circlesToggleBtn.disabled = interactionLocked;
   resultantBtn.classList.toggle("is-active", resultantVisible);
   resultantBtn.setAttribute("aria-pressed", String(resultantVisible));
+  forceKeypadConfirm.disabled = forceEdit === null;
+  forceKeypadKeys.forEach((key) => {
+    key.disabled = forceEdit === null;
+  });
+}
+
+function clearObjectArrows(obj) {
+  for (const arrow of obj.arrows) {
+    arrow.group.remove();
+    arrow.labelGroup.remove();
+    if (arrow.jetMotor) arrow.jetMotor.remove();
+  }
+  obj.arrows.length = 0;
 }
 
 function clearArrows() {
-  for (const arrow of arrows) {
-    arrow.group.remove();
-    arrow.label.remove();
-    if (arrow.jetMotor) arrow.jetMotor.remove();
+  for (const obj of objects) {
+    clearObjectArrows(obj);
   }
-  arrows.length = 0;
+}
+
+function removeObject(obj) {
+  if (objects.length <= 1) return;
+  if (forceEdit && forceEdit.obj === obj) closeForceKeypad();
+
+  clearObjectArrows(obj);
+  clearConstructionOnly(obj);
+  obj.wrap.remove();
+  const index = objects.indexOf(obj);
+  if (index >= 0) objects.splice(index, 1);
 }
 
 function stopAnimation() {
@@ -788,29 +1143,27 @@ function stopAnimation() {
   }
 }
 
-function applyPosition() {
-  objectWrap.style.transform = `translate(${position.x}px, ${position.y}px)`;
-}
-
 function snapExistingArrowsToAxis() {
-  const origin = getArrowOrigin();
+  for (const obj of objects) {
+    const origin = getArrowOrigin(obj);
 
-  for (const arrow of arrows) {
-    if (!arrow.force) continue;
+    for (const arrow of obj.arrows) {
+      if (!arrow.force) continue;
 
-    const { dx, dy, magnitude } = arrow.force;
-    let toX;
-    let toY;
+      const { dx, dy, magnitude } = arrow.force;
+      let toX;
+      let toY;
 
-    if (Math.abs(dx) >= Math.abs(dy)) {
-      toX = origin.x + Math.sign(dx || 1) * magnitude;
-      toY = origin.y;
-    } else {
-      toX = origin.x;
-      toY = origin.y + Math.sign(dy || 1) * magnitude;
+      if (Math.abs(dx) >= Math.abs(dy)) {
+        toX = origin.x + Math.sign(dx || 1) * magnitude;
+        toY = origin.y;
+      } else {
+        toX = origin.x;
+        toY = origin.y + Math.sign(dy || 1) * magnitude;
+      }
+
+      updateArrow(obj, arrow, origin.x, origin.y, toX, toY);
     }
-
-    updateArrow(arrow, origin.x, origin.y, toX, toY);
   }
 
   syncResultantIfVisible();
@@ -831,41 +1184,55 @@ function toggleSnap90() {
 
 function resetSimulation() {
   stopAnimation();
+  closeForceKeypad();
 
   if (drag) {
-    const target =
-      drag.mode === "create" ? objectHit : drag.handle;
+    const target = drag.mode === "create" ? drag.obj.hit : drag.handle;
     try {
       target.releasePointerCapture(drag.pointerId);
     } catch {
       // ignore
     }
-    objectHit.classList.remove("is-dragging");
+    drag.obj.hit.classList.remove("is-dragging");
     if (drag.handle) drag.handle.classList.remove("is-dragging");
     drag = null;
   }
 
   clearConstruction();
   clearArrows();
-  position = { x: 0, y: 0 };
-  velocity = { x: 0, y: 0 };
-  simulationForce = { fx: 0, fy: 0 };
+  syncCircleCount();
+
+  for (let i = 0; i < objects.length; i++) {
+    const obj = objects[i];
+    obj.baseOffset =
+      i === 1
+        ? { x: SECOND_OBJECT_OFFSET.x, y: SECOND_OBJECT_OFFSET.y }
+        : { x: 0, y: 0 };
+    obj.position = { x: 0, y: 0 };
+    obj.velocity = { x: 0, y: 0 };
+    obj.simulationForce = { fx: 0, fy: 0 };
+    applyPosition(obj);
+  }
+
   lastFrameTime = null;
   snap90Active = false;
   snap90Btn.classList.remove("is-active");
   snap90Btn.setAttribute("aria-pressed", "false");
-  applyPosition();
   updateButtons();
 }
 
 function startSimulation() {
-  const { fx, fy } = getResultantForce();
   if (animating || constructionAnimating) return;
 
   animating = true;
-  simulationForce = { fx, fy };
-  velocity = { x: 0, y: 0 };
   lastFrameTime = null;
+
+  for (const obj of objects) {
+    const { fx, fy } = getResultantForce(obj);
+    obj.simulationForce = { fx, fy };
+    obj.velocity = { x: 0, y: 0 };
+  }
+
   syncJetMotors();
   updateButtons();
 
@@ -881,14 +1248,16 @@ function startSimulation() {
     const dt = Math.min(0.05, (now - lastFrameTime) / 1000);
     lastFrameTime = now;
 
-    const ax = (simulationForce.fx / OBJECT_MASS) * ACCEL_SCALE;
-    const ay = (simulationForce.fy / OBJECT_MASS) * ACCEL_SCALE;
+    for (const obj of objects) {
+      const ax = (obj.simulationForce.fx / OBJECT_MASS) * ACCEL_SCALE;
+      const ay = (obj.simulationForce.fy / OBJECT_MASS) * ACCEL_SCALE;
 
-    velocity.x += ax * dt;
-    velocity.y += ay * dt;
-    position.x += velocity.x * dt;
-    position.y += velocity.y * dt;
-    applyPosition();
+      obj.velocity.x += ax * dt;
+      obj.velocity.y += ay * dt;
+      obj.position.x += obj.velocity.x * dt;
+      obj.position.y += obj.velocity.y * dt;
+      applyPosition(obj);
+    }
 
     animationFrameId = requestAnimationFrame(step);
   }
@@ -896,48 +1265,50 @@ function startSimulation() {
   animationFrameId = requestAnimationFrame(step);
 }
 
-function onPointerDown(e) {
-  if (!isPrimaryPointerDown(e) || animating || constructionAnimating) return;
-  if (arrows.length >= MAX_ARROWS) return;
+function onObjectPointerDown(e, obj) {
+  if (!isPrimaryPointerDown(e) || animating || constructionAnimating || forceEdit) return;
+  if (obj.arrows.length >= MAX_ARROWS) return;
 
-  const p = clientToSvgPoint(e.clientX, e.clientY);
-  const tipArrow = findArrowByTipPoint(p.x, p.y);
-  if (tipArrow) {
-    startTipDrag(e, tipArrow);
+  const found = findArrowByTipPoint(e.clientX, e.clientY);
+  if (found) {
+    startTipDrag(e, found.obj, found.arrow);
     return;
   }
 
   e.preventDefault();
 
-  beginPointerCapture(e);
-  objectHit.classList.add("is-dragging");
+  beginPointerCapture(obj.svg, e);
+  obj.hit.classList.add("is-dragging");
 
-  const arrow = createArrow();
-  arrows.push(arrow);
+  const arrow = createArrow(obj);
+  obj.arrows.push(arrow);
   updateButtons();
 
-  const origin = getArrowOrigin();
+  const origin = getArrowOrigin(obj);
+  const p = clientToSvgPoint(obj.svg, e.clientX, e.clientY);
   drag = {
     mode: "create",
     pointerId: e.pointerId,
+    obj,
     arrow,
     handle: null,
   };
 
-  updateArrow(arrow, origin.x, origin.y, p.x, p.y);
+  updateArrow(obj, arrow, origin.x, origin.y, p.x, p.y);
 }
 
-function startTipDrag(e, arrow) {
+function startTipDrag(e, obj, arrow) {
   e.preventDefault();
   e.stopPropagation();
 
-  beginPointerCapture(e);
+  beginPointerCapture(obj.svg, e);
   arrow.tipHandle.classList.add("is-dragging");
 
-  const p = clientToSvgPoint(e.clientX, e.clientY);
+  const p = clientToSvgPoint(obj.svg, e.clientX, e.clientY);
   drag = {
     mode: "tip",
     pointerId: e.pointerId,
+    obj,
     arrow,
     handle: arrow.tipHandle,
     startX: p.x,
@@ -946,36 +1317,30 @@ function startTipDrag(e, arrow) {
   };
 }
 
-function onTipPointerDown(e) {
-  if (!isPrimaryPointerDown(e) || animating || constructionAnimating) return;
-
-  const handle = e.currentTarget;
-  const arrow = arrows.find((item) => item.tipHandle === handle);
-  if (!arrow) return;
-
-  startTipDrag(e, arrow);
+function onTipPointerDown(e, obj, arrow) {
+  if (!isPrimaryPointerDown(e) || animating || constructionAnimating || forceEdit) return;
+  startTipDrag(e, obj, arrow);
 }
 
-function onSvgPointerDown(e) {
-  if (!isPrimaryPointerDown(e) || animating || constructionAnimating || drag) return;
-  if (objectHit.contains(e.target)) return;
+function onSvgPointerDown(e, obj) {
+  if (!isPrimaryPointerDown(e) || animating || constructionAnimating || drag || forceEdit) return;
+  if (obj.hit.contains(e.target)) return;
   if (e.target instanceof Element && e.target.closest(".arrow-tip-handle")) return;
 
-  const p = clientToSvgPoint(e.clientX, e.clientY);
-  const tipArrow = findArrowByTipPoint(p.x, p.y);
-  if (tipArrow) startTipDrag(e, tipArrow);
+  const found = findArrowByTipPoint(e.clientX, e.clientY);
+  if (found && found.obj === obj) startTipDrag(e, found.obj, found.arrow);
 }
 
 function onPointerMove(e) {
   if (!drag || e.pointerId !== drag.pointerId) return;
 
-  const p = clientToSvgPoint(e.clientX, e.clientY);
+  const p = clientToSvgPoint(drag.obj.svg, e.clientX, e.clientY);
   if (drag.mode === "tip" && !shouldUpdateTipDrag(drag, p.x, p.y)) return;
 
   e.preventDefault();
 
-  const origin = getArrowOrigin();
-  updateArrow(drag.arrow, origin.x, origin.y, p.x, p.y);
+  const origin = getArrowOrigin(drag.obj);
+  updateArrow(drag.obj, drag.arrow, origin.x, origin.y, p.x, p.y);
   updateButtons();
 }
 
@@ -983,31 +1348,53 @@ function endDrag(e) {
   if (!drag || e.pointerId !== drag.pointerId) return;
   e.preventDefault();
 
-  releasePointerCaptureSafe(e.pointerId);
+  releasePointerCaptureSafe(drag.obj.svg, e.pointerId);
 
-  objectHit.classList.remove("is-dragging");
+  drag.obj.hit.classList.remove("is-dragging");
   if (drag.handle) drag.handle.classList.remove("is-dragging");
 
   if (drag.mode !== "tip" || drag.hasMoved) {
-    const p = clientToSvgPoint(e.clientX, e.clientY);
-    const origin = getArrowOrigin();
-    const visible = updateArrow(drag.arrow, origin.x, origin.y, p.x, p.y);
-    if (!visible) removeArrow(drag.arrow);
+    const p = clientToSvgPoint(drag.obj.svg, e.clientX, e.clientY);
+    const origin = getArrowOrigin(drag.obj);
+    const visible = updateArrow(drag.obj, drag.arrow, origin.x, origin.y, p.x, p.y);
+    if (!visible) removeArrow(drag.obj, drag.arrow);
   }
 
   drag = null;
   updateButtons();
 }
 
-objectHit.addEventListener("pointerdown", onPointerDown);
-svg.addEventListener("pointerdown", onSvgPointerDown);
-svg.addEventListener("pointermove", onPointerMove);
-svg.addEventListener("pointerup", endDrag);
-svg.addEventListener("pointercancel", endDrag);
+const firstWrap = objectsStage.querySelector(".object-wrap");
+if (!firstWrap) {
+  throw new Error("Missing initial object.");
+}
+const firstObject = initObjectFromWrap(firstWrap, 0, 0);
+bindObjectEvents(firstObject);
+
 startBtn.addEventListener("click", startSimulation);
 resultantBtn.addEventListener("click", toggleResultantConstruction);
 snap90Btn.addEventListener("click", toggleSnap90);
 resetBtn.addEventListener("click", resetSimulation);
+circlesToggleBtn.addEventListener("click", toggleTwoCircles);
+forceKeypadClose.addEventListener("click", closeForceKeypad);
+forceKeypadConfirm.addEventListener("click", confirmForceKeypad);
+forceKeypadOverlay.addEventListener("pointerdown", (e) => {
+  if (e.target === forceKeypadOverlay) closeForceKeypad();
+});
+forceKeypadKeys.forEach((key) => {
+  key.addEventListener("click", handleForceKeypadClick);
+});
+
+document.addEventListener("keydown", (e) => {
+  if (!forceEdit) return;
+
+  if (e.key === "Enter") {
+    e.preventDefault();
+    confirmForceKeypad();
+  } else if (e.key === "Escape") {
+    closeForceKeypad();
+  }
+});
 
 loadJetMotorTemplate().then(() => {
   syncJetMotors();
@@ -1024,4 +1411,5 @@ if (stage) {
   );
 }
 
+updateCirclesToggleUi();
 updateButtons();
